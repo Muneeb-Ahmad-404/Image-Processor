@@ -1,5 +1,7 @@
 #include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
+#include "opencv2/imgproc.hpp"
+#include "opencv2/highgui.hpp"
 #include <vector>
 #include <filesystem>
 #include <iostream>
@@ -12,6 +14,8 @@ int main()
 {
     string folderPath = "images/";
     vector<Mat> imgs;
+    vector<Mat> grayImgs;
+    vector<Mat> resizedImgs;
     int totalImages = 0;
 
     if(!exists(folderPath) || !is_directory(folderPath)){
@@ -37,17 +41,46 @@ int main()
         }
 
         Mat img = imread(entry.path().string(), IMREAD_COLOR);
-
+        
         if(img.empty()){
             cout << "Skipped: Could not read the image: " << entry.path().filename() << endl;
             continue;
         }
-
+        
         imgs.push_back(img);
         totalImages++;
         cout << "Loaded: " << entry.path().filename() << ": " << img.cols << " x " << img.rows << endl;
     }
-
+    
     cout << "Total images loaded: " << totalImages << endl;
+
+    for(const auto& img : imgs){
+        Mat gray;
+        cvtColor(img, gray, COLOR_BGR2GRAY);
+        if(gray.empty()){
+            cout << "Skipped: Could not convert to grayscale" << endl;
+            continue;
+        }
+        grayImgs.push_back(gray);
+        //check
+        // imshow("Grayscale Image", gray);
+        // waitKey(0);
+        cout<< "Converted to grayscale" << endl;
+    }
+
+    for(const auto& gray : grayImgs){
+        Mat resized;
+        resize(gray, resized, Size(100, 100));
+        if(resized.empty()){
+            cout << "Skipped: Could not resize the image" << endl;
+            continue;
+        }
+        resizedImgs.push_back(resized);
+        //check
+        // imshow("Resized Image", resized);
+        // waitKey(0);
+        cout<< "Resized to 100x100" << endl;
+    }
+
     return 0;
 }
