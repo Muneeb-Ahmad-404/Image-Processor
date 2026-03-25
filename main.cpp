@@ -10,17 +10,30 @@ using namespace cv;
 using namespace std;
 using namespace filesystem;
 
+void loadingImages(const string& folderPath, vector<Mat>& imgs);
+void convertToGrayscale(const vector<Mat>& imgs, vector<Mat>& grayImgs);
+void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs);
+
 int main()
 {
     string folderPath = "images/";
     vector<Mat> imgs;
     vector<Mat> grayImgs;
     vector<Mat> resizedImgs;
+    
+    loadingImages(folderPath, imgs);
+    convertToGrayscale(imgs, grayImgs);
+    resizeImages(grayImgs, resizedImgs);
+    
+    return 0;
+}
+
+void loadingImages(const string& folderPath, vector<Mat>& imgs) {
     int totalImages = 0;
 
     if(!exists(folderPath) || !is_directory(folderPath)){
         cout<< "Directory does not exist: " << folderPath << endl;
-        return 1;
+        return;
     }
 
     for(const auto& entry : directory_iterator(folderPath)){
@@ -53,7 +66,9 @@ int main()
     }
     
     cout << "Total images loaded: " << totalImages << endl;
+}
 
+void convertToGrayscale(const vector<Mat>& imgs, vector<Mat>& grayImgs) {
     for(const auto& img : imgs){
         Mat gray;
         cvtColor(img, gray, COLOR_BGR2GRAY);
@@ -67,7 +82,9 @@ int main()
         // waitKey(0);
         cout<< "Converted to grayscale" << endl;
     }
+}
 
+void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs) {
     for(const auto& gray : grayImgs){
         Mat resized;
         resize(gray, resized, Size(100, 100));
@@ -81,6 +98,4 @@ int main()
         // waitKey(0);
         cout<< "Resized to 100x100" << endl;
     }
-
-    return 0;
 }
