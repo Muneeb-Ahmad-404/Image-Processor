@@ -2,6 +2,7 @@
 #include <opencv2/imgcodecs.hpp>
 #include "opencv2/imgproc.hpp"
 #include "opencv2/highgui.hpp"
+#include <opencv2/photo.hpp>
 #include <vector>
 #include <filesystem>
 #include <iostream>
@@ -13,6 +14,7 @@ using namespace filesystem;
 bool loadingImages(const string& folderPath, vector<Mat>& imgs);
 void convertToGrayscale(const vector<Mat>& imgs, vector<Mat>& grayImgs);
 void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs);
+void hairRemoval(const vector<Mat>& imgs, vector<Mat>& hairRemovedImgs);
 
 int main()
 {
@@ -20,6 +22,7 @@ int main()
     vector<Mat> imgs;
     vector<Mat> grayImgs;
     vector<Mat> resizedImgs;
+    vector<Mat> hairRemovedImgs;
     
     bool loaded = loadingImages(folderPath, imgs);
     if(!loaded){
@@ -27,8 +30,10 @@ int main()
         return -1;
     }
 
-    convertToGrayscale(imgs, grayImgs);
-    resizeImages(grayImgs, resizedImgs);
+    // Mat img1 = imread("images/ISIC_0282040.jpg", IMREAD_COLOR);
+    // imgs.push_back(img1);
+
+    hairRemoval(imgs, hairRemovedImgs);
     
     return 0;
 }
@@ -66,7 +71,7 @@ bool loadingImages(const string& folderPath, vector<Mat>& imgs) {
         
         imgs.push_back(img);
         totalLoaded++;
-        cout << "Loaded: " << entry.path().filename() << ": " << img.cols << " x " << img.rows << endl;
+        // cout << "Loaded: " << entry.path().filename() << ": " << img.cols << " x " << img.rows << endl;
     }
     
     cout << "Total images loaded: " << totalLoaded << endl;
@@ -84,21 +89,21 @@ void convertToGrayscale(const vector<Mat>& imgs, vector<Mat>& grayImgs) {
         }
         grayImgs.push_back(gray);
         totalConverted++;
-        //check
+        // check
         // imshow("Grayscale Image", gray);
         // waitKey(0);
         // cout<< "Converted to grayscale" << endl;
     }
-    cout << "Total images converted to grayscale: " << totalConverted << endl;
+    // cout << "Total images converted to grayscale: " << totalConverted << endl;
 }
 
 void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs) {
     int totalResized = 0;
     for(const auto& gray : grayImgs){
         Mat resized;
-        resize(gray, resized, Size(100, 100));
+        resize(gray, resized, Size(1200, 800));
         if(resized.empty()){
-            cout << "Skipped: Could not resize the image" << endl;
+            // cout << "Skipped: Could not resize the image" << endl;
             continue;
         }
         resizedImgs.push_back(resized);
@@ -108,5 +113,57 @@ void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs) {
         // waitKey(0);
         // cout<< "Resized to 100x100" << endl;
     }
-    cout << "Total images resized: " << totalResized << endl;
+    // cout << "Total images resized: " << totalResized << endl;
+}
+
+void hairRemoval(const vector<Mat>& imgs, vector<Mat>& hairRemovedImgs) {
+    vector<Mat> grayImgs;
+    convertToGrayscale(imgs, grayImgs);
+
+    int totalProcessed = 0;
+    for(int i = 0; i < imgs.size(); i++){
+        Mat blackhat, mask, kernel, final;
+        kernel = getStructuringElement(MORPH_ELLIPSE, Size(51, 51));
+
+        // Step 1: Blackhat
+        morphologyEx(grayImgs[i], blackhat, MORPH_BLACKHAT, kernel);
+       
+        // Step 2: Normalize
+        normalize(blackhat, blackhat, 0, 255, NORM_MINMAX);
+       
+        // Step 3: Threshold 
+        double minVal, maxVal;
+        minMaxLoc(blackhat, &minVal, &maxVal);
+        double threshVal = minVal + 0.15 * (maxVal - minVal); // 15% above min
+        threshold(blackhat, mask, threshVal, 255, THRESH_BINARY);
+        
+        int nonZero = countNonZero(mask);
+        // cout << "Mask non-zero pixels: " << nonZero << endl;
+        if(nonZero == 0){
+            // cout << "Mask empty, skipping inpaint" << endl;
+            hairRemovedImgs.push_back(grayImgs[i].clone());
+            continue;
+        }
+        dilate(mask, mask, getStructuringElement(MORPH_ELLIPSE, Size(3,3)));
+        
+        // Step 4: Inpaint (slow if mask is huge)
+        inpaint(imgs[i], mask, final, 7.0, INPAINT_TELEA);
+
+        if(final.empty()){
+            // cout << "Skipped: inpaint failed" << endl;
+            continue;
+        }
+
+        hairRemovedImgs.push_back(final.clone());
+        totalProcessed++;
+
+        // Step 5: Save output
+        // imshow("Hair Removed Image", final);
+        // waitKey(0);
+        static int idx = 0;
+        string outPath = "processed_images/hair_removed" + to_string(idx++) + ".png";
+        imwrite(outPath, final);
+        cout << "Saved: " << outPath << endl;
+    }
+    cout << "Total images processed: " << totalProcessed << endl;
 }
