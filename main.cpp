@@ -8,6 +8,7 @@
 #include <iostream>
 #include <omp.h>
 #include <chrono>
+#include <mpi.h>
 
 using namespace cv;
 using namespace std;
@@ -16,22 +17,28 @@ using namespace filesystem;
 bool loadingImages(const string& folderPath, vector<Mat>& imgs);
 void convertToGrayscale(const vector<Mat>& imgs, vector<Mat>& grayImgs);
 void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs);
-void hairRemoval(const vector<Mat>& imgs);
+void hairRemoval(const vector<string>& imagePaths, const string& outFolder, int rank, int size);
 
-int main()
-{
-    string folderPath = "images/";
-    vector<Mat> imgs;
-    vector<Mat> grayImgs;
-    vector<Mat> resizedImgs;
-    vector<Mat> hairRemovedImgs;
-    
-    bool loaded = loadingImages(folderPath, imgs);
-    if(!loaded){
-        cout << "Failed to load images from folder: " << folderPath << endl;
-        return -1;
+int main(int argc, char** argv){
+    MPI_Init(&argc, &argv);
+
+    int rank, size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+
+    string folderPath = "images";
+    string outFolder = "processed_images";
+    create_directories(outFolder);
+
+    vector<string> imagePaths;
+    for(const auto& entry : directory_iterator(folderPath)){
+        if(entry.path().extension() == ".jpg" || entry.path().extension() == ".png")
+            imagePaths.push_back(entry.path().string());
     }
-    hairRemoval(imgs);
+
+    hairRemoval(imagePaths, outFolder, rank, size);
+
+    MPI_Finalize();
     return 0;
 }
 
@@ -113,26 +120,33 @@ void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs) {
     // cout << "Total images resized: " << totalResized << endl;
 }
 
-void hairRemoval(const vector<Mat>& imgs) {
+void hairRemoval(const vector<string>& imagePaths, const string& outFolder, int rank, int size) {
     int totalProcessed = 0;
     auto totalStart = chrono::high_resolution_clock::now();
 
+    // Split work across MPI ranks
+    vector<string> localImages;
+    for(size_t i = 0; i < imagePaths.size(); i++){
+        if(i % size == rank) // simple round-robin distribution
+            localImages.push_back(imagePaths[i]);
+    }
+
     #pragma omp parallel for schedule(dynamic)
-    for(int i = 0; i < imgs.size(); i++){
+    for(size_t i = 0; i < localImages.size(); i++){
         auto start = chrono::high_resolution_clock::now();
+        string imgPath = localImages[i];
+        Mat orig = imread(imgPath, IMREAD_COLOR);
+        if(orig.empty()) continue;
 
-        const Mat& orig = imgs[i];
-
-        // Step 0: Downscale original for inpainting
-        double scaleFactor = 800.0 / max(orig.cols, orig.rows); // max dimension ~800px
+        // Downscale for faster inpainting
+        double scaleFactor = 800.0 / max(orig.cols, orig.rows);
         Mat smallOrig, smallGray;
         resize(orig, smallOrig, Size(), scaleFactor, scaleFactor, INTER_AREA);
         cvtColor(smallOrig, smallGray, COLOR_BGR2GRAY);
 
-        // Step 1: Multiscale Blackhat
-        Mat blackhat, mask, finalSmall;
-        vector<int> kernelSizes = {15, 25, 35};
+        // Multiscale Blackhat
         Mat accumMask = Mat::zeros(smallGray.size(), CV_8UC1);
+        vector<int> kernelSizes = {15, 25, 35};
 
         for(auto kSize : kernelSizes){
             Mat khat, msk;
@@ -149,20 +163,17 @@ void hairRemoval(const vector<Mat>& imgs) {
             bitwise_or(accumMask, msk, accumMask);
         }
 
-        int nonZero = countNonZero(accumMask);
         Mat final;
+        int nonZero = countNonZero(accumMask);
         if(nonZero == 0){
             final = orig.clone();
         } else {
-            // Step 2: Inpaint on downscaled image
+            Mat finalSmall;
             inpaint(smallOrig, accumMask, finalSmall, 3.0, INPAINT_TELEA);
-
-            // Step 3: Upscale to original size
             resize(finalSmall, final, orig.size(), 0, 0, INTER_CUBIC);
         }
 
-        // Save output immediately
-        string outPath = "processed_images/hair_removed_" + to_string(i) + ".png";
+        string outPath = outFolder + "/hair_removed_" + path(imgPath).filename().string();
         imwrite(outPath, final);
 
         auto end = chrono::high_resolution_clock::now();
@@ -171,11 +182,14 @@ void hairRemoval(const vector<Mat>& imgs) {
         #pragma omp critical
         {
             totalProcessed++;
-            cout << "Processed image " << i << " in " << elapsed.count() << " sec, saved as: " << outPath << endl;
+            cout << "[Rank " << rank << "] Processed: " << imgPath
+                 << " in " << elapsed.count() << " sec, saved as: " << outPath << endl;
         }
     }
 
     auto totalEnd = chrono::high_resolution_clock::now();
     chrono::duration<double> totalElapsed = totalEnd - totalStart;
-    cout << "Total images processed: " << totalProcessed << " in " << totalElapsed.count() << " sec" << endl;
+    #pragma omp critical
+    cout << "[Rank " << rank << "] Total images processed: " << totalProcessed
+         << " in " << totalElapsed.count() << " sec" << endl;
 }
