@@ -6,6 +6,8 @@
 #include <vector>
 #include <filesystem>
 #include <iostream>
+#include <omp.h>
+#include <chrono>
 
 using namespace cv;
 using namespace std;
@@ -14,7 +16,7 @@ using namespace filesystem;
 bool loadingImages(const string& folderPath, vector<Mat>& imgs);
 void convertToGrayscale(const vector<Mat>& imgs, vector<Mat>& grayImgs);
 void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs);
-void hairRemoval(const vector<Mat>& imgs, vector<Mat>& hairRemovedImgs);
+void hairRemoval(const vector<Mat>& imgs);
 
 int main()
 {
@@ -29,7 +31,7 @@ int main()
         cout << "Failed to load images from folder: " << folderPath << endl;
         return -1;
     }
-    hairRemoval(imgs, hairRemovedImgs);
+    hairRemoval(imgs);
     return 0;
 }
 
@@ -111,10 +113,11 @@ void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs) {
     // cout << "Total images resized: " << totalResized << endl;
 }
 
-void hairRemoval(const vector<Mat>& imgs, vector<Mat>& hairRemovedImgs) {
+void hairRemoval(const vector<Mat>& imgs) {
     int totalProcessed = 0;
     auto totalStart = chrono::high_resolution_clock::now();
 
+    #pragma omp parallel for schedule(dynamic)
     for(int i = 0; i < imgs.size(); i++){
         auto start = chrono::high_resolution_clock::now();
 
@@ -147,29 +150,29 @@ void hairRemoval(const vector<Mat>& imgs, vector<Mat>& hairRemovedImgs) {
         }
 
         int nonZero = countNonZero(accumMask);
+        Mat final;
         if(nonZero == 0){
-            hairRemovedImgs.push_back(orig.clone());
-            continue;
+            final = orig.clone();
+        } else {
+            // Step 2: Inpaint on downscaled image
+            inpaint(smallOrig, accumMask, finalSmall, 3.0, INPAINT_TELEA);
+
+            // Step 3: Upscale to original size
+            resize(finalSmall, final, orig.size(), 0, 0, INTER_CUBIC);
         }
 
-        // Step 2: Inpaint on downscaled image
-        inpaint(smallOrig, accumMask, finalSmall, 3.0, INPAINT_TELEA);
-
-        // Step 3: Upscale to original size
-        Mat final;
-        resize(finalSmall, final, orig.size(), 0, 0, INTER_CUBIC);
-
-        hairRemovedImgs.push_back(final.clone());
-        totalProcessed++;
-
         // Save output immediately
-        static int idx = 0;
-        string outPath = "processed_images/hair_removed_" + to_string(idx++) + ".png";
+        string outPath = "processed_images/hair_removed_" + to_string(i) + ".png";
         imwrite(outPath, final);
 
         auto end = chrono::high_resolution_clock::now();
         chrono::duration<double> elapsed = end - start;
-        cout << "Processed image " << i << " in " << elapsed.count() << " sec, saved as: " << outPath << endl;
+
+        #pragma omp critical
+        {
+            totalProcessed++;
+            cout << "Processed image " << i << " in " << elapsed.count() << " sec, saved as: " << outPath << endl;
+        }
     }
 
     auto totalEnd = chrono::high_resolution_clock::now();
