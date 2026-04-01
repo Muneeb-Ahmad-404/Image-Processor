@@ -29,12 +29,7 @@ int main()
         cout << "Failed to load images from folder: " << folderPath << endl;
         return -1;
     }
-
-    // Mat img1 = imread("images/ISIC_0282040.jpg", IMREAD_COLOR);
-    // imgs.push_back(img1);
-
     hairRemoval(imgs, hairRemovedImgs);
-    
     return 0;
 }
 
@@ -117,53 +112,67 @@ void resizeImages(const vector<Mat>& grayImgs, vector<Mat>& resizedImgs) {
 }
 
 void hairRemoval(const vector<Mat>& imgs, vector<Mat>& hairRemovedImgs) {
-    vector<Mat> grayImgs;
-    convertToGrayscale(imgs, grayImgs);
-
     int totalProcessed = 0;
+    auto totalStart = chrono::high_resolution_clock::now();
+
     for(int i = 0; i < imgs.size(); i++){
-        Mat blackhat, mask, kernel, final;
-        kernel = getStructuringElement(MORPH_ELLIPSE, Size(51, 51));
+        auto start = chrono::high_resolution_clock::now();
 
-        // Step 1: Blackhat
-        morphologyEx(grayImgs[i], blackhat, MORPH_BLACKHAT, kernel);
-       
-        // Step 2: Normalize
-        normalize(blackhat, blackhat, 0, 255, NORM_MINMAX);
-       
-        // Step 3: Threshold 
-        double minVal, maxVal;
-        minMaxLoc(blackhat, &minVal, &maxVal);
-        double threshVal = minVal + 0.15 * (maxVal - minVal); // 15% above min
-        threshold(blackhat, mask, threshVal, 255, THRESH_BINARY);
-        
-        int nonZero = countNonZero(mask);
-        // cout << "Mask non-zero pixels: " << nonZero << endl;
+        const Mat& orig = imgs[i];
+
+        // Step 0: Downscale original for inpainting
+        double scaleFactor = 800.0 / max(orig.cols, orig.rows); // max dimension ~800px
+        Mat smallOrig, smallGray;
+        resize(orig, smallOrig, Size(), scaleFactor, scaleFactor, INTER_AREA);
+        cvtColor(smallOrig, smallGray, COLOR_BGR2GRAY);
+
+        // Step 1: Multiscale Blackhat
+        Mat blackhat, mask, finalSmall;
+        vector<int> kernelSizes = {15, 25, 35};
+        Mat accumMask = Mat::zeros(smallGray.size(), CV_8UC1);
+
+        for(auto kSize : kernelSizes){
+            Mat khat, msk;
+            Mat kernel = getStructuringElement(MORPH_ELLIPSE, Size(kSize, kSize));
+            morphologyEx(smallGray, khat, MORPH_BLACKHAT, kernel);
+            normalize(khat, khat, 0, 255, NORM_MINMAX);
+
+            double minVal, maxVal;
+            minMaxLoc(khat, &minVal, &maxVal);
+            double threshVal = minVal + 0.15 * (maxVal - minVal);
+            threshold(khat, msk, threshVal, 255, THRESH_BINARY);
+
+            dilate(msk, msk, getStructuringElement(MORPH_ELLIPSE, Size(3,3)));
+            bitwise_or(accumMask, msk, accumMask);
+        }
+
+        int nonZero = countNonZero(accumMask);
         if(nonZero == 0){
-            // cout << "Mask empty, skipping inpaint" << endl;
-            hairRemovedImgs.push_back(grayImgs[i].clone());
+            hairRemovedImgs.push_back(orig.clone());
             continue;
         }
-        dilate(mask, mask, getStructuringElement(MORPH_ELLIPSE, Size(3,3)));
-        
-        // Step 4: Inpaint (slow if mask is huge)
-        inpaint(imgs[i], mask, final, 7.0, INPAINT_TELEA);
 
-        if(final.empty()){
-            // cout << "Skipped: inpaint failed" << endl;
-            continue;
-        }
+        // Step 2: Inpaint on downscaled image
+        inpaint(smallOrig, accumMask, finalSmall, 3.0, INPAINT_TELEA);
+
+        // Step 3: Upscale to original size
+        Mat final;
+        resize(finalSmall, final, orig.size(), 0, 0, INTER_CUBIC);
 
         hairRemovedImgs.push_back(final.clone());
         totalProcessed++;
 
-        // Step 5: Save output
-        // imshow("Hair Removed Image", final);
-        // waitKey(0);
+        // Save output immediately
         static int idx = 0;
-        string outPath = "processed_images/hair_removed" + to_string(idx++) + ".png";
+        string outPath = "processed_images/hair_removed_" + to_string(idx++) + ".png";
         imwrite(outPath, final);
-        cout << "Saved: " << outPath << endl;
+
+        auto end = chrono::high_resolution_clock::now();
+        chrono::duration<double> elapsed = end - start;
+        cout << "Processed image " << i << " in " << elapsed.count() << " sec, saved as: " << outPath << endl;
     }
-    cout << "Total images processed: " << totalProcessed << endl;
+
+    auto totalEnd = chrono::high_resolution_clock::now();
+    chrono::duration<double> totalElapsed = totalEnd - totalStart;
+    cout << "Total images processed: " << totalProcessed << " in " << totalElapsed.count() << " sec" << endl;
 }
