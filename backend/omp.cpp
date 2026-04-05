@@ -16,8 +16,8 @@ using namespace filesystem;
 void hairRemovalOMP(const vector<string>& imagePaths, const string& outFolder);
 
 int main(int argc, char** argv){
-    string folderPath = "../images";
-    string outFolder = "../processed_images/omp";
+    string folderPath = "images";
+    string outFolder = "processed_images/omp";
     create_directories(outFolder);
 
     vector<string> imagePaths;
@@ -81,7 +81,7 @@ void hairRemovalOMP(const vector<string>& imagePaths, const string& outFolder) {
         }
 
         // Save output
-        string outPath = outFolder + "/hair_removed_" + to_string(i) + "_" + path(imgPath).filename().string();
+        string outPath = outFolder + "/hair_removed_" + path(imgPath).filename().string();
         imwrite(outPath, final);
 
         auto end = chrono::high_resolution_clock::now();

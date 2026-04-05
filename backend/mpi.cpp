@@ -23,8 +23,8 @@ int main(int argc, char** argv){
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    string folderPath = "../images";
-    string outFolder = "../processed_images/mpi";
+    string folderPath = "images";
+    string outFolder = "processed_images/mpi";
     create_directories(outFolder);
 
     vector<string> imagePaths;

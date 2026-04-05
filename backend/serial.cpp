@@ -15,8 +15,8 @@ using namespace filesystem;
 void hairRemovalSerial(const vector<string>& imagePaths, const string& outFolder);
 
 int main(){
-    string folderPath = "../images";
-    string outFolder = "../processed_images/serial";
+    string folderPath = "images";
+    string outFolder = "processed_images/serial";
     create_directories(outFolder);
 
     vector<string> imagePaths;
