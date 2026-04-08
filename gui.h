@@ -8,8 +8,9 @@
 #include <QSlider>
 #include <QStringList>
 #include <QThread>
-#include <QElapsedTimer>
 #include <QProcess>
+#include <QTimer>
+#include <chrono>
 
 class Worker : public QThread {
     Q_OBJECT
@@ -18,40 +19,39 @@ public:
         : QThread(parent), imageList(images), methodName(method) {}
 
 signals:
-    void updateImage(const QString &orig, const QString &proc);
-    void finished(double);
+    void processingDone();
 
 protected:
     void run() override {
-        QElapsedTimer timer;
-        timer.start();
-
         QString folder;
-        if(methodName=="Serial") folder="serial";
-        else if(methodName=="OMP") folder="omp";
-        else if(methodName=="MPI") folder="mpi";
-        else folder="ocl";
+        if (methodName == "Serial") folder = "serial";
+        else if (methodName == "OMP") folder = "omp";
+        else if (methodName == "MPI") folder = "mpi";
+        else folder = "ocl";
 
-        for(const QString &img : imageList) {
-            QString inputPath = "images/" + img;
+        for (const QString &img : imageList) {
+            QString inputPath  = "images/" + img;
             QString outputPath = "processed_images/" + folder + "/hair_removed_" + img;
 
+            QString program;
             QStringList args;
-            if(methodName=="MPI" || methodName=="OCL") {
+
+            if (methodName == "MPI" || methodName == "OCL") {
+                program = "mpirun";
                 args << "-np" << "4" << "./backend/" + methodName.toLower();
             } else {
-                args << "./backend/" + methodName.toLower();
+                program = "./backend/" + methodName.toLower();
             }
+
             args << inputPath << outputPath;
 
             QProcess proc;
-            proc.start(methodName=="MPI" || methodName=="OCL" ? "mpirun" : "./backend/" + methodName.toLower(), args);
+            proc.start(program, args);
+            proc.waitForStarted();
             proc.waitForFinished(-1);
-
-            emit updateImage(inputPath, outputPath);
         }
 
-        emit finished(timer.elapsed()/1000.0);
+        emit processingDone();
     }
 
 private:
@@ -63,22 +63,28 @@ private:
 class GUI : public QWidget {
     Q_OBJECT
 public:
-    GUI(QWidget *parent = nullptr);
+    explicit GUI(QWidget *parent = nullptr);
 
 private slots:
     void runAll();
     void showCurrentImage();
+    void pollOutputFolder();
 
 private:
     void loadImages();
 
-    QLabel *originalLabel;
-    QLabel *processedLabel;
-    QLabel *timeLabel;
-    QComboBox *methodBox;
-    QSlider *slider;
+    QLabel     *originalLabel;
+    QLabel     *processedLabel;
+    QLabel     *timeLabel;
+    QComboBox  *methodBox;
+    QSlider    *slider;
+    QTimer     *pollTimer;
+
     QStringList imageList;
-    QString currentImage;
+    QString     currentImage;
+    QString     currentFolder;
+
+    std::chrono::high_resolution_clock::time_point startTime;
 };
 
-#endif // GUI_H
+#endif
