@@ -157,4 +157,4 @@ int main(int argc, char *argv[]) {
     return app.exec();
 }
 
-#include "gui.moc"
+#include "gui.moc"gi
