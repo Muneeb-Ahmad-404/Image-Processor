@@ -1,37 +1,34 @@
 # ParallelDerm — Hair Removal Preprocessing Pipeline
 
-A parallelised hair removal pipeline for dermoscopic images, benchmarking **Serial**, **OpenMP**, **MPI**, and **OpenCL** backends with two frontend options: a C++ Qt GUI and a Python PyQt6 GUI.
-
-Built as the preprocessing stage for a melanoma skin-tone bias mitigation project (FYP).
+A parallelised dermoscopic image preprocessing pipeline benchmarking **Serial**, **OpenMP**, **MPI**, and **OpenCL** backends against each other. Built as a PDC assignment and extended into a portfolio-grade tool for medical imaging pipelines.
 
 ---
 
 ## Project Structure
 
 ```
-ParallelDerm/
-├── backend/
-│   ├── hair_removal_serial.cpp     # Baseline serial implementation
-│   ├── hair_removal_omp.cpp        # OpenMP parallel implementation
-│   ├── hair_removal_mpi.cpp        # MPI distributed implementation
-│   ├── hair_removal_ocl.cpp        # OpenCL GPU implementation
-│   └── CMakeLists.txt
+Project/
+├── backend/                        # C++ backend binaries (compiled)
+│   ├── hair_removal_serial
+│   ├── hair_removal_omp
+│   ├── hair_removal_mpi
+│   └── hair_removal_ocl
 │
-├── frontend-cpp/
-│   ├── gui.cpp                     # Qt6 C++ GUI
-│   ├── gui.h
-│   └── CMakeLists.txt
-│
-├── frontend-py/
-│   └── gui.py                      # PyQt6 Python GUI
+├── gui/                            # C++ Qt6 frontend (compiled binary)
 │
 ├── images/                         # Input dermoscopic images (ISIC dataset)
-├── processed_images/
+│
+├── processed_images/               # Output organised by method
 │   ├── serial/
 │   ├── omp/
 │   ├── mpi/
 │   └── ocl/
 │
+├── gui.h                           # C++ Qt6 GUI header
+├── main.cpp                        # C++ Qt6 GUI entry point
+├── gui.py                          # Python PyQt6 GUI (drop-in alternative)
+├── main.py                         # Python entry point (calls gui.py)
+├── imageprocessing.code-workspace  # VS Code workspace
 └── README.md
 ```
 
@@ -39,14 +36,12 @@ ParallelDerm/
 
 ## Algorithm
 
-The pipeline applies a morphological hair removal technique:
+Each backend implements the same morphological hair removal pipeline:
 
-1. **Grayscale conversion** of the input image
-2. **Black-hat morphological transform** to isolate dark hair strands against lighter skin
-3. **Thresholding** to produce a binary hair mask
-4. **Inpainting** (Telea algorithm) to reconstruct skin texture under the mask
-
-Each backend implements this same algorithm with different parallelism strategies.
+1. **Grayscale conversion** — reduce input to single channel
+2. **Black-hat transform** — isolate dark hair strands against lighter skin using a large elliptical structuring element
+3. **Binary thresholding** — produce a hair mask from the transform result
+4. **Inpainting** — reconstruct skin texture under the mask using the Telea algorithm
 
 ---
 
@@ -55,23 +50,22 @@ Each backend implements this same algorithm with different parallelism strategie
 | Method | Parallelism | Notes |
 |--------|-------------|-------|
 | Serial | None | Baseline reference |
-| OMP | CPU threads via OpenMP | `--workers N` controls thread count |
+| OMP | CPU threads via OpenMP | Configurable thread count |
 | MPI | Multi-process via MPI | `mpirun -np N` |
-| OCL | GPU via OpenCL | Requires compatible GPU driver |
+| OCL | GPU via OpenCL | Requires compatible GPU + driver |
 
-### Build (CMake)
+### Building the backends
 
 ```bash
+# Dependencies: OpenCV, OpenMP, OpenMPI, OpenCL
 mkdir build && cd build
-cmake ..
+cmake ../backend
 make -j$(nproc)
 ```
 
-**Dependencies:** OpenCV, OpenMP, MPI (e.g. OpenMPI), OpenCL
+### CLI interface
 
-### Backend CLI
-
-All backends accept the same interface:
+All backends accept the same arguments:
 
 ```bash
 ./hair_removal_serial  <input_dir> <output_dir>
@@ -80,57 +74,58 @@ mpirun -np <N> ./hair_removal_mpi <input_dir> <output_dir>
 ./hair_removal_ocl     <input_dir> <output_dir>
 ```
 
-Output images are written as `hair_removed_<original_filename>`.
+Output files are written as `hair_removed_<original_filename>` into the target directory.
 
 ---
 
 ## Frontends
 
-Both frontends are functionally equivalent. Choose based on your environment.
+Two frontends are provided. Both call the same backend binaries.
 
-### C++ Qt GUI (`frontend-cpp/`)
-
-**Dependencies:** Qt6
+### C++ Qt6 GUI (`main.cpp` + `gui.h`)
 
 ```bash
-cd frontend-cpp
-mkdir build && cd build
+# Dependencies: Qt6
+mkdir build-gui && cd build-gui
 cmake ..
 make
-./HairRemovalBenchmark
+./gui
 ```
 
-### Python PyQt6 GUI (`frontend-py/`)
+### Python PyQt6 GUI (`gui.py`)
 
-**Dependencies:** Python 3.10+, PyQt6
+A richer, portfolio-grade interface with a **draggable split-view** for before/after comparison, live scan-line progress, per-method benchmark table with speedup ratios, and folder pickers.
 
 ```bash
 pip install PyQt6
-cd frontend-py
+python main.py
+# or directly:
 python gui.py
 ```
 
-### GUI Features
+#### GUI Features
 
-- Select method: Serial / OMP / MPI / OCL
-- Configure worker/thread count
-- Browse for custom input and output folders
-- Slider to navigate through the image set
-- Side-by-side original vs processed view
-- Live elapsed timer, images-done counter, and img/sec throughput
-- Progress bar tracking output folder population in real time
+| Feature | Description |
+|---------|-------------|
+| Split-view viewer | Drag the divider to reveal original vs processed on the same image |
+| Live scan-line | Animated progress indicator that tracks output folder in real time |
+| Elapsed clock | mm:ss.ms precision timer per run |
+| Metrics sidebar | Images done, img/sec throughput, progress percentage |
+| Benchmark table | Records runtime for each method and shows speedup vs Serial |
+| Folder pickers | Browse for any input/output directory at runtime |
+| Method switcher | Instantly compare outputs from different backends |
 
 ---
 
 ## Dataset
 
-Images are sourced from the [ISIC Archive](https://www.isic-archive.com/) (International Skin Imaging Collaboration). Place `.jpg` / `.png` images into the `images/` directory before running.
+Images from the [ISIC Archive](https://www.isic-archive.com/). Place `.jpg` / `.png` files into `images/` before running.
 
 ---
 
-## Results
+## Sample Benchmark
 
-Benchmark results on an Intel Core i7 / NVIDIA GTX 1650 with 200 ISIC images:
+Results on Intel Core i7 / NVIDIA GTX 1650, 200 ISIC images:
 
 | Method | Time (s) | Speedup |
 |--------|----------|---------|
@@ -139,13 +134,13 @@ Benchmark results on an Intel Core i7 / NVIDIA GTX 1650 with 200 ISIC images:
 | MPI (8 procs) | ~8.4 | ~5.0× |
 | OCL (GPU) | ~3.2 | ~13.1× |
 
-> Results will vary by hardware. Run your own benchmarks using the GUI timer.
+> Run your own benchmarks — results populate the sidebar table automatically after each method completes.
 
 ---
 
-## Related Work
+## Context
 
-This pipeline is the preprocessing stage for an FYP on **melanoma detection with skin-tone bias mitigation using dual-conditioned GANs**. Clean, hair-free images improve the quality of synthetic image generation across the Fitzpatrick scale.
+Built for the Parallel & Distributed Computing course (CSC334) and extended as a preprocessing module for an FYP on melanoma detection with skin-tone bias mitigation. Clean, hair-free images improve synthetic image generation quality across the Fitzpatrick scale.
 
 ---
 
